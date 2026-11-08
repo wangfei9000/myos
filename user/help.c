@@ -1,16 +1,22 @@
-#include "kapi.h"
+#include "kernel.h"
 
 /* 帮助页。按 q 回到菜单。 */
-void main(struct kapi *api)
+void help_main(void)
 {
-	api->puts("help\n");
-	api->puts("1  show this page\n");
-	api->puts("2  run thread_a, print A\n");
-	api->puts("3  run thread_b, print B\n");
-	api->puts("4  power off\n");
-	api->puts("q  return to menu\n");
+	vga_puts("help\n");
+	serial_puts("help\n");
+	vga_puts("1  show this page\n");
+	serial_puts("1  show this page\n");
+	vga_puts("2  run thread_a, print A\n");
+	serial_puts("2  run thread_a, print A\n");
+	vga_puts("3  run thread_b, print B\n");
+	serial_puts("3  run thread_b, print B\n");
+	vga_puts("4  power off\n");
+	serial_puts("4  power off\n");
+	vga_puts("q  return to menu\n");
+	serial_puts("q  return to menu\n");
 	for (;;) {
-		if (api->poll() == 'q')
+		if (kbd_poll() == 'q')
 			return;
 	}
 }

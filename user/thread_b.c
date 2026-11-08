@@ -1,13 +1,14 @@
-#include "kapi.h"
+#include "kernel.h"
 
 /* 连续输出 B。按 q 回到菜单。 */
-void main(struct kapi *api)
+void thread_b_main(void)
 {
-	api->puts("thread_b running, press q to return\n");
+	vga_puts("thread_b running, press q to return\n");
+	serial_puts("thread_b running, press q to return\n");
 	for (;;) {
-		if (api->poll() == 'q')
+		if (kbd_poll() == 'q')
 			return;
-		api->serial_putc('B');
-		api->putc('B');
+		serial_putc('B');
+		vga_putc('B');
 	}
 }

@@ -12,9 +12,9 @@
 | `user/thread_a.c` | `thread_a_main` | `2  run thread_a` |
 | `user/thread_b.c` | `thread_b_main` | `3  run thread_b` |
 
-三个函数不能都叫 `main`。它们进同一个 ELF，符号名必须各不相同。声明放在 `user/progs.h`，`kmain.c` 包含这个头。
+三个函数不能都叫 `main`。它们进同一个 ELF，符号名必须各不相同。声明写在 `kernel.h`。
 
-函数形参仍是 `struct kapi *`。程序只调用 `kapi` 里的 `putc`、`puts`、`serial_putc`、`poll`，不直接调用 `vga_putc`。`puts` 同时写屏幕和串口。
+这些函数没有参数。它们和内核是同一份代码，直接调用 `vga_putc`、`serial_putc`、`kbd_poll`。
 
 ## kmain 里的表
 
@@ -22,7 +22,7 @@
 struct item {
     char key;
     const char *title;
-    void (*fn)(struct kapi *api);
+    void (*fn)(void);
 };
 
 static const struct item items[] = {
@@ -34,13 +34,7 @@ static const struct item items[] = {
 
 `show_menu` 按这张表逐行输出，最后固定加一行 `4  power off`。关机仍写端口 `0x604`，留在 `kmain.c`。
 
-`menu` 等到一个键。键是 `4` 就关机。否则在表里找相同的 `key`，调用 `items[i].fn(&api)`。没有对应项就重新画菜单。
-
-`kapi` 在 `kmain` 里填一次：
-
-```text
-struct kapi api = { 1, vga_putc, menu_puts, serial_putc, kbd_poll };
-```
+`menu` 等到一个键。键是 `4` 就关机。否则在表里找相同的 `key`，调用 `items[i].fn()`。没有对应项就重新画菜单。
 
 ## 编译
 
@@ -48,7 +42,7 @@ struct kapi api = { 1, vga_putc, menu_puts, serial_putc, kbd_poll };
 
 拿掉 `fs.c`、`user/hdr.S`、`user/prog.ld`、`tools/packmyfs.py`、`tools/stampprog.py`。`myos.img` 回到「引导扇区 + `kernel.bin`」。`make run` 用 `-kernel`，菜单不依赖 `-drive`。
 
-再加一个程序时：新建 `user/foo.c`，导出 `foo_main`，在 `user/progs.h` 声明，在 `items` 里加一行，把这个 `.c` 加进 `SRCS`。
+再加一个程序时：新建 `user/foo.c`，导出 `foo_main`，在 `kernel.h` 声明，在 `items` 里加一行，把这个 `.c` 加进 `SRCS`。
 
 ## 不做的事
 

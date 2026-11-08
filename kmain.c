@@ -1,5 +1,17 @@
 #include "kernel.h"
 
+struct item {
+	char key;
+	const char *title;
+	void (*fn)(void);
+};
+
+static const struct item items[] = {
+	{ '1', "help", help_main },
+	{ '2', "run thread_a", thread_a_main },
+	{ '3', "run thread_b", thread_b_main },
+};
+
 /* 等到一个键。时钟中断会把 hlt 唤醒，再继续查键盘。 */
 static int wait_key(void)
 {
@@ -28,54 +40,37 @@ static void poweroff(void)
 		__asm__ volatile("cli; hlt");
 }
 
-/* 菜单行来自 MYFS 目录。关机项固定留在内核里。 */
+/* 按 items 逐行显示。关机项固定留在内核里。 */
 static void show_menu(void)
 {
-	int order[64];
-	int n = fs_count();
-
 	vga_clear();
 	vga_puts("menu\n");
 	serial_puts("\nmenu\n");
-	for (int i = 0; i < n; i++)
-		order[i] = i;
-	for (int i = 0; i < n; i++) {
-		for (int j = i + 1; j < n; j++) {
-			if (fs_key(order[j]) < fs_key(order[i])) {
-				int tmp = order[i];
-				order[i] = order[j];
-				order[j] = tmp;
-			}
-		}
-	}
-	for (int i = 0; i < n; i++) {
-		char key = fs_key(order[i]);
-		const char *title = fs_title(order[i]);
-		vga_putc(key);
+	for (unsigned i = 0; i < sizeof(items) / sizeof(items[0]); i++) {
+		vga_putc(items[i].key);
 		vga_puts("  ");
-		vga_puts(title);
+		vga_puts(items[i].title);
 		vga_putc('\n');
-		serial_putc(key);
+		serial_putc(items[i].key);
 		serial_puts("  ");
-		serial_puts(title);
+		serial_puts(items[i].title);
 		serial_putc('\n');
 	}
 	vga_puts("4  power off\n");
 	serial_puts("4  power off\n");
 }
 
-/* 按目录里的键运行对应程序。q 只在程序内部返回。 */
+/* 按键等于表里的 key 时调用对应函数。q 只在程序内部返回。 */
 static void menu(void)
 {
-	fs_init();
 	for (;;) {
 		show_menu();
 		int key = wait_key();
 		if (key == '4')
 			poweroff();
-		for (int i = 0; i < fs_count(); i++) {
-			if (fs_key(i) == key) {
-				fs_run(i);
+		for (unsigned i = 0; i < sizeof(items) / sizeof(items[0]); i++) {
+			if (items[i].key == key) {
+				items[i].fn();
 				break;
 			}
 		}
@@ -84,7 +79,7 @@ static void menu(void)
 
 /*
  * entry64 调用的 C 入口。初始化完成后开中断，进入菜单。
- * 可运行的程序在磁盘上，不在这个文件里。
+ * 可运行的程序在 user/ 里，由上面的 items 引用。
  */
 void kmain(void)
 {

@@ -23,16 +23,12 @@ void vga_status(const char *s);
 /* 读取一个按下的键，没有键时返回 -1。 */
 int kbd_poll(void);
 
-/* 从磁盘读 MYFS 目录。失败时菜单里没有用户程序。 */
-int fs_init(void);
-/* 目录里的可执行文件个数。 */
-int fs_count(void);
-/* 第 index 个程序的菜单按键。 */
-char fs_key(int index);
-/* 第 index 个程序在菜单上的文字。 */
-const char *fs_title(int index);
-/* 装入并运行第 index 个程序，返回后回到调用者。 */
-void fs_run(int index);
+/* 帮助页。按 q 回到菜单。 */
+void help_main(void);
+/* 连续输出 A。按 q 回到菜单。 */
+void thread_a_main(void);
+/* 连续输出 B。按 q 回到菜单。 */
+void thread_b_main(void);
 
 /* 用 Multiboot 信息建立物理页位图。 */
 void pmm_init(void);
