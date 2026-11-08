@@ -28,15 +28,40 @@ static void vga_cursor(void)
 	outb(0x3d5, (uint8_t)(pos >> 8));
 }
 
-/* 满屏后整屏上移一行，最后一行清空。 */
+/* 第 1 行及以下上移一行。第 0 行留给状态栏，不参与滚动。 */
 static void vga_scroll(void)
 {
-	for (int i = 0; i < (VGA_ROWS - 1) * VGA_COLS; i++)
+	for (int i = VGA_COLS; i < (VGA_ROWS - 1) * VGA_COLS; i++)
 		vga[i] = vga[i + VGA_COLS];
 	for (int i = (VGA_ROWS - 1) * VGA_COLS; i < VGA_ROWS * VGA_COLS; i++)
 		vga[i] = (uint16_t)' ' | (VGA_COLOR << 8);
 	row = VGA_ROWS - 1;
 	col = 0;
+}
+
+/* 清空文字屏幕，光标回到左上角。 */
+void vga_clear(void)
+{
+	for (int i = 0; i < VGA_ROWS * VGA_COLS; i++)
+		vga[i] = (uint16_t)' ' | (VGA_COLOR << 8);
+	row = 0;
+	col = 0;
+	vga_cursor();
+}
+
+/* 把第 0 行写成状态栏，之后的输出从第 1 行开始。 */
+void vga_status(const char *s)
+{
+	int i = 0;
+	for (; s[i] && i < VGA_COLS; i++)
+		vga[i] = (uint16_t)(uint8_t)s[i] | (VGA_COLOR << 8);
+	for (; i < VGA_COLS; i++)
+		vga[i] = (uint16_t)' ' | (VGA_COLOR << 8);
+	if (row == 0) {
+		row = 1;
+		col = 0;
+		vga_cursor();
+	}
 }
 
 /* 向屏幕写一个字符。换行或写满一行后进入下一行。 */

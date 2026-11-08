@@ -8,7 +8,7 @@ CFLAGS := -m64 -ffreestanding -fno-pie -fno-stack-protector -mno-red-zone \
 	-mgeneral-regs-only -fno-asynchronous-unwind-tables -Wall -Wextra -c -O1
 LDFLAGS := -m elf_x86_64 -z max-page-size=0x1000 -z noexecstack --build-id=none -T linker.ld
 
-SRCS := kmain.c pmm.c task.c idt.c pic.c serial.c vga.c
+SRCS := kmain.c pmm.c task.c idt.c pic.c serial.c vga.c kbd.c
 ASMS := boot.S swtch.S trap.S
 OBJS := $(SRCS:.c=.o) $(ASMS:.S=.o)
 

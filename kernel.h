@@ -15,6 +15,13 @@ void panic(const char *msg);
 void vga_putc(char c);
 /* 向文字屏幕逐字符写字符串。 */
 void vga_puts(const char *s);
+/* 清空文字屏幕，光标回到左上角。 */
+void vga_clear(void);
+/* 把第 0 行写成状态栏，正文从第 1 行继续。 */
+void vga_status(const char *s);
+
+/* 读取一个按下的键，没有键时返回 -1。 */
+int kbd_poll(void);
 
 /* 用 Multiboot 信息建立物理页位图。 */
 void pmm_init(void);
