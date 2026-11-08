@@ -1,32 +1,6 @@
 #include "kernel.h"
 
-/* 画出主菜单。线程运行时按 q 会回到这里。 */
-static void show_menu(void)
-{
-	vga_clear();
-	vga_puts("menu\n");
-	vga_puts("1  help\n");
-	vga_puts("2  run thread_a\n");
-	vga_puts("3  run thread_b\n");
-	vga_puts("4  power off\n");
-	vga_puts("press q while a thread runs to return\n");
-	serial_puts("\nmenu: 1 help, 2 thread_a, 3 thread_b, 4 power off, q back\n");
-}
-
-/* 帮助页。按 q 回到主菜单，按 2 或 3 直接运行对应线程。 */
-static void show_help(void)
-{
-	vga_clear();
-	vga_puts("help\n");
-	vga_puts("1  show this page\n");
-	vga_puts("2  run thread_a, print A\n");
-	vga_puts("3  run thread_b, print B\n");
-	vga_puts("4  power off\n");
-	vga_puts("q  return to menu\n");
-	serial_puts("help: 1 help, 2 A, 3 B, 4 off, q menu\n");
-}
-
-/* 等到菜单键。时钟中断会把 hlt 唤醒，再继续查键盘。 */
+/* 等到一个键。时钟中断会把 hlt 唤醒，再继续查键盘。 */
 static int wait_key(void)
 {
 	int c;
@@ -34,36 +8,6 @@ static int wait_key(void)
 	while ((c = kbd_poll()) < 0)
 		__asm__ volatile("hlt");
 	return c;
-}
-
-/* 连续输出 A。按下 q 后返回，由菜单重新显示主菜单。 */
-static void thread_a(void)
-{
-	vga_clear();
-	vga_status("thread_a running, press q to return");
-	serial_puts("thread_a start\n");
-	for (;;) {
-		if (kbd_poll() == 'q')
-			break;
-		serial_putc('A');
-		vga_putc('A');
-	}
-	serial_puts("\nthread_a stop\n");
-}
-
-/* 连续输出 B。按下 q 后返回主菜单。 */
-static void thread_b(void)
-{
-	vga_clear();
-	vga_status("thread_b running, press q to return");
-	serial_puts("thread_b start\n");
-	for (;;) {
-		if (kbd_poll() == 'q')
-			break;
-		serial_putc('B');
-		vga_putc('B');
-	}
-	serial_puts("\nthread_b stop\n");
 }
 
 /* 向端口写一个字。QEMU 用 0x604 接收关机命令。 */
@@ -84,36 +28,63 @@ static void poweroff(void)
 		__asm__ volatile("cli; hlt");
 }
 
-/* 主菜单循环。1 帮助，2 运行 A，3 运行 B，4 关机，q 回到主菜单。 */
+/* 菜单行来自 MYFS 目录。关机项固定留在内核里。 */
+static void show_menu(void)
+{
+	int order[64];
+	int n = fs_count();
+
+	vga_clear();
+	vga_puts("menu\n");
+	serial_puts("\nmenu\n");
+	for (int i = 0; i < n; i++)
+		order[i] = i;
+	for (int i = 0; i < n; i++) {
+		for (int j = i + 1; j < n; j++) {
+			if (fs_key(order[j]) < fs_key(order[i])) {
+				int tmp = order[i];
+				order[i] = order[j];
+				order[j] = tmp;
+			}
+		}
+	}
+	for (int i = 0; i < n; i++) {
+		char key = fs_key(order[i]);
+		const char *title = fs_title(order[i]);
+		vga_putc(key);
+		vga_puts("  ");
+		vga_puts(title);
+		vga_putc('\n');
+		serial_putc(key);
+		serial_puts("  ");
+		serial_puts(title);
+		serial_putc('\n');
+	}
+	vga_puts("4  power off\n");
+	serial_puts("4  power off\n");
+}
+
+/* 按目录里的键运行对应程序。q 只在程序内部返回。 */
 static void menu(void)
 {
-	show_menu();
+	fs_init();
 	for (;;) {
-		switch (wait_key()) {
-		case '1':
-			show_help();
-			break;
-		case '2':
-			thread_a();
-			show_menu();
-			break;
-		case '3':
-			thread_b();
-			show_menu();
-			break;
-		case '4':
+		show_menu();
+		int key = wait_key();
+		if (key == '4')
 			poweroff();
-			break;
-		case 'q':
-			show_menu();
-			break;
+		for (int i = 0; i < fs_count(); i++) {
+			if (fs_key(i) == key) {
+				fs_run(i);
+				break;
+			}
 		}
 	}
 }
 
 /*
  * entry64 调用的 C 入口。初始化完成后开中断，进入菜单。
- * 菜单直接调用线程函数，按 q 后函数返回，所以不再进入 scheduler。
+ * 可运行的程序在磁盘上，不在这个文件里。
  */
 void kmain(void)
 {
@@ -122,6 +93,7 @@ void kmain(void)
 	idt_init();
 	pic_init();
 	pit_init();
+	/* 页表、IDT、PIC 和 PIT 都已就绪。sti 置位 IF，时钟中断从此可以进来。 */
 	__asm__ volatile("sti");
 	menu();
 }

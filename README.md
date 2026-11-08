@@ -1,29 +1,34 @@
-# 从 32 位保护模式进入 64 位，并跑起两个内核线程
+# 从 32 位保护模式进入 64 位，并跑起一个菜单
 
-这个目录是一个可以编译的最小内核。QEMU 用 Multiboot 把它载入时，CPU 已经在 32 位保护模式，分页关闭。`boot.S` 打开长模式，`kmain` 接着建立物理页位图、时钟中断和两个内核任务。串口上会一段 `A`、一段 `B` 地轮流出现。
+这个目录是一个可以编译的最小内核。磁盘启动时，`mbr.S` 在实模式里把内核读到 1MB，打开保护模式后跳到 `boot.S` 的 `_start`。`_start` 再打开长模式，`kmain` 画出菜单。菜单可以运行两个内核线程，或关机。屏幕写 VGA 文字，串口同时写 COM1。
 
-设计草稿在 `DESIGN.md`。实现和草稿有一处不同：任务不保存单独的 `context` 结构，`swtch` 把被调用者保存的寄存器直接压在当前栈上，任务只记录 `rsp`。下面以代码为准。
+设计草稿在 `DESIGN.md`。用户程序单独放在磁盘上的设想在 `FS.md`。安装和写入 U 盘在 `INSTALL.md`。任务切换的实现和 `DESIGN.md` 有一处不同：任务不保存单独的 `context` 结构，`swtch` 把被调用者保存的寄存器直接压在当前栈上，任务只记录 `rsp`。当前菜单直接调用线程函数，没有进入 `scheduler`。
 
-它对照 Linux 6.10 压缩内核 `arch/x86/boot/compressed/head_64.S` 里 `startup_32` 的模式切换，从打开 PAE 到进入 64 位入口。实模式、A20、内核解压、KASLR、5 级页表都不在这里。后面的页分配、轮转和时钟也只是能跑起来的最小形态，不对应 `start_kernel()` 的其余部分。
+它对照 Linux 6.10 压缩内核 `arch/x86/boot/compressed/head_64.S` 里 `startup_32` 的模式切换，从打开 PAE 到进入 64 位入口。内核解压、KASLR、5 级页表都不在这里。实模式和 A20 在 `mbr.S`，不在 `boot.S`。后面的页分配、轮转和时钟也只是能跑起来的最小形态，不对应 `start_kernel()` 的其余部分。
 
 ## 建议的阅读顺序
 
-1. `linker.ld`：程序放在物理地址 1MB，页表和启动栈在映像末尾。
-2. `boot.S`：Multiboot 头、GDT、1GB 恒等映射、四条控制寄存器指令、远跳转到 `entry64`。
-3. `kmain.c`：初始化顺序。中断在这一步之前一直关着。
-4. `pmm.c`：一位一页，只分配任务栈。
-5. `task.c` 和 `swtch.S`：谁在运行，栈上放了什么，怎样换栈。
-6. `pic.c`、`idt.c`、`trap.S`：时钟怎样进来，为什么会切到另一个任务。
-7. `serial.c`：唯一的输出。
+1. `mbr.S`：实模式读盘、打开 A20、进入保护模式、跳到 `_start`。
+2. `linker.ld`：程序放在物理地址 1MB，页表和启动栈在映像末尾。
+3. `boot.S`：清 `.bss`、GDT、1GB 恒等映射、四条控制寄存器指令、远跳转到 `entry64`。
+4. `kmain.c`：初始化顺序，然后进入菜单。
+5. `vga.c`、`kbd.c`、`serial.c`：屏幕、键盘和串口。
+6. `pmm.c`：一位一页，只分配任务栈。
+7. `task.c` 和 `swtch.S`：任务表和换栈。菜单目前不调用 `scheduler`。
+8. `pic.c`、`idt.c`、`trap.S`：时钟中断和异常。
 
 ## 文件
 
 | 文件 | 作用 |
 | --- | --- |
-| `boot.S` | Multiboot 头、GDT、页表、32 位到 64 位 |
+| `mbr.S` | 磁盘第一个扇区。读内核、打开 A20、进入保护模式 |
+| `mbr.ld` | 引导扇区运行在 `0x7C00`，文件从偏移 0 开始 |
+| `boot.S` | 清 `.bss`、GDT、页表、32 位到 64 位 |
 | `linker.ld` | 链接到 1MB，留出三页页表和 4KB 启动栈 |
 | `kernel.h` | 各文件之间的函数和两个引导变量 |
-| `kmain.c` | 按顺序初始化，创建线程 A、B，进入调度器 |
+| `kmain.c` | 初始化后进入菜单，按键运行线程或关机 |
+| `vga.c` | 写 `0xB8000` 的 80×25 文字 |
+| `kbd.c` | 查询 PS/2 端口 `0x60` |
 | `pmm.c` | 物理页位图 |
 | `task.c` | 最多 8 个任务、轮转、`scheduler` |
 | `swtch.S` | 换栈；新任务从 `task_entry` 进入 |
@@ -31,7 +36,7 @@
 | `trap.S` | 异常 0–31 的桩，以及 IRQ0 |
 | `pic.c` | 8259 重映射、屏蔽，PIT 约 100Hz |
 | `serial.c` | COM1 `0x3f8` 输出和 `panic` |
-| `Makefile` | 编译、检查 Multiboot 头、转成 ELF32 后运行 |
+| `Makefile` | 编译、检查 Multiboot 头、做磁盘镜像、启动 |
 
 ## 编译和运行
 
@@ -40,23 +45,36 @@
 ```bash
 make
 make check
-make run
+make boot
 ```
 
 `make` 生成 `boot.elf`。C 和汇编都用 `gcc -m64` 编译，链接用 `ld -m elf_x86_64`。`boot.S` 开头有 `.code32`，汇编器仍按 32 位编码发出 `_start` 里的指令；`.code64` 之后才是 64 位指令。用 `objdump -d` 看 `boot.elf` 时，32 位那一段会被误判成 64 位指令，要以 `boot.S` 和机器码为准。
 
-`make check` 执行 `grub-file --is-x86-multiboot boot.elf`。成功时没有输出，退出码为 0。
+`make check` 执行 `grub-file --is-x86-multiboot boot.elf`。成功时没有输出，退出码为 0。这只说明 ELF 里还有 Multiboot 头，磁盘启动不读这个头。
 
-`make run` 先做一次格式转换，再启动：
+`make boot` 先做 `myos.img`，再从这块硬盘启动，不使用 `-kernel`：
 
 ```bash
-objcopy -O elf32-i386 boot.elf boot32.elf
-qemu-system-x86_64 -kernel boot32.elf -display curses -serial file:serial.log -no-reboot
+objcopy -O binary boot.elf kernel.bin
+qemu-system-x86_64 -drive file=myos.img,format=raw,if=ide -display curses -serial file:serial.log -no-reboot
 ```
 
-QEMU 的 `-kernel` 只接受 32 位 ELF。直接把 `boot.elf` 交给它会报 `Cannot load x86-64 image, give a 32bit one.` `objcopy` 只改容器：入口仍是 32 位的 `_start`，`entry64` 之后的机器码仍是 64 位。
+`myos.img` 的 LBA 0 是 `mbr.bin`，LBA 1 起是 `kernel.bin`。引导扇区把内核拷到 `0x100000`。
 
-两个线程都是死循环，自己不让出 CPU。大约每 10ms 一次时钟中断，所以同一路输出里会先连续出现几千个相同字符，再换成另一个线程的字符。VGA 文字画在当前终端里，COM1 的字节写到 `serial.log`。进程一直运行。curses 接管键盘后 Ctrl-C 不会结束 QEMU：按 Esc，再按 2，进入监视器，输入 `quit` 回车。
+`make run` 仍走 QEMU 的 `-kernel`。它先把 `boot.elf` 转成 32 位 ELF `boot32.elf`。QEMU 不接受 64 位 ELF，直接把 `boot.elf` 交给它会报 `Cannot load x86-64 image, give a 32bit one.` 转换只改容器，`entry64` 之后的机器码仍是 64 位。
+
+启动后屏幕是菜单，不是自动刷字母：
+
+```text
+menu
+1  help
+2  run thread_a
+3  run thread_b
+4  power off
+press q while a thread runs to return
+```
+
+按 `2` 或 `3` 后，对应线程一直写 `A` 或 `B`，直到按 `q` 回到菜单。按 `4` 向端口 `0x604` 写 `0x2000`，QEMU 退出。curses 占用当前终端，串口写到 `serial.log`。Ctrl-C 不会结束 QEMU。按 `4`，或按 Esc 再按 2，进入监视器后输入 `quit`。
 
 ### GTK 窗口起不来
 
@@ -69,9 +87,9 @@ make: *** [Makefile:36: run] Error 1
 
 `-display curses` 不依赖 GTK。它用终端把 80×25 文字模式画出来，`vga_putc` 写入的字符可以直接看到。curses 已经占用了这个终端，串口不能再用 `-serial stdio`，否则两路输出抢同一个屏幕。COM1 改写到 `serial.log`，需要看串口时另开文件。
 
-`kmain.c` 里如果写成 `serial_putc('A1')` 这种单引号，`'A1'` 是多字符常量，参数类型是 `char`，实际只留下最后一个字节。`'A1'` 和 `'B1'` 写到串口都是 `1`，`'A2'` 写到屏幕是 `2`。要输出两个字符，分成两次调用，例如 `vga_putc('A'); vga_putc('1');`。
+屏幕只显示单字节字符。中文的 UTF-8 写进 `0xB8000` 会变成乱码，菜单文字因此用 ASCII。
 
-CPU 不支持长模式时，屏幕左上角是红底白字 `NO`，串口没有输出。QEMU 的虚拟 CPU 支持长模式，这条路径是给真机准备的。
+CPU 不支持长模式时，屏幕左上角是红底白字 `NO`，串口没有输出。QEMU 的虚拟 CPU 支持长模式，这条路径是给真机准备的。写入 U 盘的步骤在 `INSTALL.md`。
 
 清理：
 
@@ -81,9 +99,13 @@ make clean
 
 ## 指令从哪条开始执行
 
-CPU 执行的第一条指令在 `boot.S` 的 `_start`。长模式切换完成之后，才 `call kmain`。源文件不会整份跑完：`boot.S` 里的 Multiboot 头是数据，`no_long_mode` 在支持长模式时不会走到。
+从磁盘启动时，CPU 的第一条指令在 `mbr.S` 的 `_start`，地址是 `0x7C00`，还是 16 位实模式。它打开 A20，把 `kernel.bin` 读到 `0x100000`，进入 32 位保护模式，再跳到内核的 `_start`。
 
-QEMU 加载 `boot32.elf` 后，按链接入口跳到 `_start`。这时还是 32 位保护模式。`_start` 保存 Multiboot 的 EAX、EBX，装上 GDT，检查长模式，建好低 1GB 页表，然后按固定顺序写 CR4、CR3、EFER、CR0。`boot.S` 第 133 行远跳到 `entry64`，第 142 到 149 行把段寄存器和栈准备好，再调用 C 函数：
+`make run` 没有这段扇区程序。QEMU 的 `-kernel` 已经处在 32 位保护模式，直接跳到 `boot.S` 的 `_start`。
+
+长模式切换完成之后，才 `call kmain`。`boot.S` 里的 Multiboot 头是数据，`no_long_mode` 在支持长模式时不会走到。
+
+`_start` 先清 `.bss`，再保存 EAX、EBX，装上 GDT，检查长模式，建好低 1GB 页表，然后按固定顺序写 CR4、CR3、EFER、CR0。远跳到 `entry64` 之后，把段寄存器和栈准备好，再调用 C 函数：
 
 ```text
 ljmpl $SEL_CODE64, $entry64
@@ -99,20 +121,26 @@ entry64:
 
 `entry64` 仍在 `boot.S` 里，已经是 64 位代码。它把栈设到 `stack_top`，然后调用 `kmain`。
 
-`kmain` 里的顺序是：物理页、任务表、IDT、PIC、PIT，再创建两个线程，开中断，进入 `scheduler`。`scheduler` 不返回，所以 `call kmain` 后面的 `hlt` 循环不会执行。
+`kmain` 里的顺序是：物理页、任务表、IDT、PIC、PIT，开中断，进入 `menu`。`menu` 不返回，所以 `call kmain` 后面的 `hlt` 循环不会执行。
 
-`thread_a` 和 `thread_b` 不是 `kmain` 直接调用的。`task_create` 只把函数指针放上任务栈。真正开始执行要等调度器 `swtch` 过来，从 `swtch.S` 的 `task_entry` 进入。
+按 `2` 或 `3` 时，菜单直接调用 `thread_a` 或 `thread_b`。按 `q` 后函数返回，菜单再画一次。`task_create` 和 `scheduler` 仍在 `task.c` 里，这条菜单路径没有用到它们。
 
-## 从加载到两个字母
+## 从加载到菜单
 
 ```text
-QEMU -kernel
-  32 位保护模式，分页关闭
-  EAX = 0x2BADB002，EBX = Multiboot 信息的物理地址
+BIOS
+  把 LBA 0 载入 0x7C00，实模式
         |
         v
-_start
-  关中断，保存 EAX / EBX
+mbr.S
+  打开 A20
+  从 LBA 1 把 kernel.bin 拷到 0x100000
+  CR0.PE = 1，跳到内核 _start
+        |
+        v
+boot.S _start
+  已在 32 位保护模式，分页关闭
+  清 .bss，保存 EAX / EBX
   装上 GDT，数据段 0x10，ESP = stack_top
   CPUID 确认支持长模式
         |
@@ -128,17 +156,15 @@ entry64
         v
 kmain
   pmm_init -> task_init -> idt_init -> pic_init -> pit_init
-  task_create(thread_a) -> task_create(thread_b)
   sti
-  scheduler          不再返回
-        |
-        v
-时钟 IRQ0
-  当前任务 yield，swtch 回到调度器
-  调度器挑下一个 READY 任务，swtch 过去
+  menu
+    1 帮助  2 thread_a  3 thread_b  4 关机
+    线程里按 q 返回菜单
 ```
 
-`boot.S` 里的 `cli` 一直有效，直到 `kmain` 创建完两个任务才 `sti`。页表、IDT 和任务栈都在中断打开之前准备好。
+`make run` 从 `_start` 开始，没有前面的 BIOS 和 `mbr.S`。那时 EAX 是 Multiboot 魔数 `0x2BADB002`。磁盘启动时 EAX 不是这个魔数，`pmm_init` 按 128MB 计算内存。
+
+`boot.S` 里的 `cli` 一直有效，直到 `kmain` 进入菜单之前才 `sti`。页表和 IDT 都在中断打开之前准备好。
 
 ## 映像布局
 
@@ -149,24 +175,26 @@ kmain
 | 地址 | 符号 | 内容 |
 | --- | --- | --- |
 | `0x100000` | 映像起点 | `.text`，从 C 函数开始 |
-| `0x100624` | `multiboot_header` | 12 字节 Multiboot 头 |
-| `0x100630` | `_start` | 32 位入口 |
-| `0x1006fd` | `entry64` | 64 位入口 |
-| `0x100712` | `swtch` | 换栈 |
-| `0x10072d` | `task_entry` | 新任务第一次被调度时进入 |
-| `0x100812` | `irq_timer` | 时钟中断 |
-| `0x100868` | `gdt` | 空描述符、64 位代码、数据段 |
-| `0x1009c8` | `multiboot_magic` | 保存的 EAX |
-| `0x100a00` | `bitmap` | 8KB，覆盖最多 256MB |
-| `0x104000` | `pml4` | 页表第一页 |
-| `0x105000` | `pdpt` | 页表第二页 |
-| `0x106000` | `pd` | 页表第三页，512 个 2MB 项 |
-| `0x107000` | `stack_bottom` | 启动栈，4KB |
-| `0x108000` | `stack_top` | 启动栈顶，也是内核占用区的结尾 |
+| `0x100054` | `kmain` | 菜单入口 |
+| `0x1009e0` | `multiboot_header` | 12 字节 Multiboot 头 |
+| `0x1009ec` | `_start` | 32 位入口 |
+| `0x100ace` | `entry64` | 64 位入口 |
+| `0x100ae3` | `swtch` | 换栈 |
+| `0x100afe` | `task_entry` | 新任务第一次被调度时进入 |
+| `0x100be3` | `irq_timer` | 时钟中断 |
+| `0x100cc0` | `gdt` | 空描述符、64 位代码、数据段 |
+| `0x100fdc` | `multiboot_magic` | 保存的 EAX |
+| `0x101000` | `__bss_start` | `.bss` 起点，`_start` 从这里清到 `_end` |
+| `0x101020` | `bitmap` | 8KB，覆盖最多 256MB |
+| `0x105000` | `pml4` | 页表第一页 |
+| `0x106000` | `pdpt` | 页表第二页 |
+| `0x107000` | `pd` | 页表第三页，512 个 2MB 项 |
+| `0x108000` | `stack_bottom` | 启动栈，4KB |
+| `0x109000` | `stack_top` | 启动栈顶，也是 `_end` |
 
 页表和栈不占文件空间，它们在 `.bss` 里用符号把当前位置向前拨。`stack_top` 之后的物理页才交给 `pmm_alloc`。
 
-Multiboot 头不必位于文件第一个字节，但必须 4 字节对齐，并且完整落在映像文件的前 8192 字节里。当前头的文件偏移是 `0x1624`。链接脚本用了 `-z max-page-size=0x1000`。x86-64 链接器默认按 2MB 对齐装载段，那样头会被推到 8192 字节之外，GRUB 和 QEMU 都认不出这个映像。
+Multiboot 头不必位于文件第一个字节，但必须 4 字节对齐，并且完整落在 ELF 文件的前 8192 字节里。链接脚本用了 `-z max-page-size=0x1000`。x86-64 链接器默认按 2MB 对齐装载段，那样头会被推到 8192 字节之外，QEMU 的 `-kernel` 就认不出这个映像。磁盘启动不读这个头，它按 `readelf` 里的入口地址跳到 `_start`。
 
 ## `boot.S`：保护模式到长模式
 
@@ -254,7 +282,7 @@ ljmpl $0x08, $entry64
 
 ### `entry64`
 
-把 EAX 清零，再写入 DS、ES、SS。64 位寻址不再使用这些段的基址，空选择子即可。ESP 再次设成 `stack_top`，然后 `call kmain`。`scheduler` 不返回。万一 `kmain` 返回了，后面是 `hlt` 死循环。
+把 EAX 清零，再写入 DS、ES、SS。64 位寻址不再使用这些段的基址，空选择子即可。ESP 再次设成 `stack_top`，然后 `call kmain`。`menu` 不返回。万一 `kmain` 返回了，后面是 `hlt` 死循环。
 
 ## `kmain`：初始化顺序
 
@@ -264,13 +292,13 @@ task_init()
 idt_init()
 pic_init()
 pit_init()
-task_create(thread_a)
-task_create(thread_b)
 sti
-scheduler()
+menu()
 ```
 
-`thread_a` 和 `thread_b` 各自死循环调用 `serial_putc`。它们不调用任何让出 CPU 的函数。能换成另一个字母，只能是因为时钟中断进得来，并且 `swtch` 换了栈。
+`menu` 按键选择帮助、`thread_a`、`thread_b` 或关机。两个线程各自循环调用 `serial_putc` 和 `vga_putc`，并查询键盘。按下 `q` 就从线程函数返回。
+
+`task.c` 里的 `scheduler` 仍按时钟中断轮转任务，菜单这条路径没有调用它。
 
 这个顺序和 Linux `start_kernel()` 的前半段同一方向：先有任务结构，再装中断和时钟，最后才开中断。Linux 后面还有 `mm_init`、`rest_init`、pid 1 和 `kthreadd`，这里没有。
 
@@ -327,7 +355,7 @@ RUNNING  正在占用 CPU，或者已经让出、等待被切回来
 rsp 在这里
 ```
 
-第一次被 `swtch` 进来时，六个寄存器弹成 0，`ret` 到 `task_entry`。`task_entry` 执行 `sti`，再弹出 `fn` 并 `call`。函数如果返回，就 `hlt` 停住。正常的 A、B 线程不会返回。
+第一次被 `swtch` 进来时，六个寄存器弹成 0，`ret` 到 `task_entry`。`task_entry` 执行 `sti`，再弹出 `fn` 并 `call`。函数如果返回，就 `hlt` 停住。菜单里的 A、B 线程不走这条路径，它们由 `menu` 直接调用，按 `q` 后 `return`。
 
 `sti` 放在 `task_entry` 里，是因为 `swtch` 不保存 `RFLAGS`。调度器在切出去之前执行了 `cli`。老任务被切回来时，要靠自己栈上的 `iretq` 恢复中断标志；新任务没有那一帧，所以由 `task_entry` 打开中断。
 
