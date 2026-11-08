@@ -20,6 +20,7 @@ SECTIONS
 	}
 
 	.bss : {
+		__bss_start = .;
 		*(.bss)
 		*(.bss.*)
 		*(COMMON)
@@ -34,6 +35,7 @@ SECTIONS
 		stack_bottom = .;
 		. += 4096;
 		stack_top = .;
+		_end = .;
 	}
 
 	/DISCARD/ : {

@@ -54,11 +54,18 @@ _start:
 	cld
 
 	/*
-	 * Multiboot 把魔数放在 eax，信息结构放在 ebx。
-	 * 后面的 cpuid 会覆盖这两个寄存器，所以先存下来。
+	 * 先保住 EAX / EBX。磁盘启动没有 Multiboot 魔数，pmm 会退回 128MB。
+	 * .bss 不能靠引导程序清零，这里自己从 __bss_start 清到 _end。
 	 */
-	movl %eax, multiboot_magic
-	movl %ebx, multiboot_info_phys
+	movl %eax, %esi
+	movl %ebx, %ebp
+	movl $__bss_start, %edi
+	movl $_end, %ecx
+	subl %edi, %ecx
+	xorl %eax, %eax
+	rep stosb
+	movl %esi, multiboot_magic
+	movl %ebp, multiboot_info_phys
 
 	/* 先换上我们自己的 GDT。64 位代码段的 L 位必须是 1，D 位必须是 0。 */
 	lgdt gdt_ptr

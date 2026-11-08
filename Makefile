@@ -12,7 +12,7 @@ SRCS := kmain.c pmm.c task.c idt.c pic.c serial.c vga.c kbd.c
 ASMS := boot.S swtch.S trap.S
 OBJS := $(SRCS:.c=.o) $(ASMS:.S=.o)
 
-.PHONY: all check run clean
+.PHONY: all check run img boot clean
 
 all: boot.elf
 
@@ -37,5 +37,28 @@ boot32.elf: boot.elf
 run: boot32.elf
 	qemu-system-x86_64 -kernel boot32.elf -display curses -serial file:serial.log -no-reboot
 
+kernel.bin: boot.elf
+	objcopy -O binary boot.elf kernel.bin
+
+mbr.o: mbr.S boot.elf kernel.bin
+	entry=$$(readelf -h boot.elf | awk '/Entry point/ {print $$4}'); \
+	sectors=$$(( ($$(wc -c < kernel.bin) + 511) / 512 )); \
+	$(CC) -m32 -ffreestanding -c -DKERNEL_ENTRY=$$entry -DKERNEL_SECTORS=$$sectors -o mbr.o mbr.S
+
+mbr.bin: mbr.o mbr.ld
+	$(LD) -m elf_i386 -T mbr.ld -o mbr.elf mbr.o
+	objcopy -O binary mbr.elf mbr.bin
+
+# LBA 0 是引导扇区，LBA 1 起是内核的原始二进制。
+myos.img: mbr.bin kernel.bin
+	dd if=/dev/zero of=myos.img bs=512 count=$$(( $$(wc -c < kernel.bin) / 512 + 2 )) status=none
+	dd if=mbr.bin of=myos.img conv=notrunc status=none
+	dd if=kernel.bin of=myos.img bs=512 seek=1 conv=notrunc status=none
+
+img: myos.img
+
+boot: myos.img
+	qemu-system-x86_64 -drive file=myos.img,format=raw,if=ide -display curses -serial file:serial.log -no-reboot
+
 clean:
-	rm -f $(OBJS) boot.elf boot32.elf serial.log
+	rm -f $(OBJS) boot.elf boot32.elf kernel.bin mbr.o mbr.elf mbr.bin myos.img serial.log
