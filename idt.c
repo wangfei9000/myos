@@ -15,6 +15,10 @@ static struct idt_entry idt[256];
 extern uint64_t isr_table[];
 extern void irq_timer(void);
 
+/*
+ * 填写一个 16 字节的中断门。选择子 0x08，类型 0x8E。
+ * CPU 进入这种门时会清掉中断标志。
+ */
 static void set_gate(int vector, void *handler)
 {
 	uint64_t addr = (uint64_t)handler;
@@ -27,6 +31,7 @@ static void set_gate(int vector, void *handler)
 	idt[vector].zero = 0;
 }
 
+/* 异常 0 到 31 指向 isr_table，向量 32 指向时钟 irq_timer，然后 lidt。 */
 void idt_init(void)
 {
 	for (int i = 0; i < 32; i++)
@@ -43,6 +48,10 @@ void idt_init(void)
 	__asm__ volatile("lidt %0" : : "m"(desc));
 }
 
+/*
+ * trap_common 调用。串口打印向量号和错误码。
+ * 向量 14 是页错误，再打印 CR2。打印完停机，不从异常返回。
+ */
 void trap_handler(uint64_t vector, uint64_t err)
 {
 	serial_puts("trap ");

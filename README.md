@@ -66,6 +66,30 @@ CPU 不支持长模式时，屏幕左上角是红底白字 `NO`，串口没有�
 make clean
 ```
 
+## 指令从哪条开始执行
+
+CPU 执行的第一条指令在 `boot.S` 的 `_start`。长模式切换完成之后，才 `call kmain`。源文件不会整份跑完：`boot.S` 里的 Multiboot 头是数据，`no_long_mode` 在支持长模式时不会走到。
+
+QEMU 加载 `boot32.elf` 后，按链接入口跳到 `_start`。这时还是 32 位保护模式。`_start` 保存 Multiboot 的 EAX、EBX，装上 GDT，检查长模式，建好低 1GB 页表，然后按固定顺序写 CR4、CR3、EFER、CR0。`boot.S` 第 133 行远跳到 `entry64`，第 142 到 149 行把段寄存器和栈准备好，再调用 C 函数：
+
+```text
+ljmpl $SEL_CODE64, $entry64
+
+entry64:
+    xorl %eax, %eax
+    movl %eax, %ds
+    movl %eax, %es
+    movl %eax, %ss
+    movl $stack_top, %esp
+    call kmain
+```
+
+`entry64` 仍在 `boot.S` 里，已经是 64 位代码。它把栈设到 `stack_top`，然后调用 `kmain`。
+
+`kmain` 里的顺序是：物理页、任务表、IDT、PIC、PIT，再创建两个线程，开中断，进入 `scheduler`。`scheduler` 不返回，所以 `call kmain` 后面的 `hlt` 循环不会执行。
+
+`thread_a` 和 `thread_b` 不是 `kmain` 直接调用的。`task_create` 只把函数指针放上任务栈。真正开始执行要等调度器 `swtch` 过来，从 `swtch.S` 的 `task_entry` 进入。
+
 ## 从加载到两个字母
 
 ```text

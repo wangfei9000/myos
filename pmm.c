@@ -12,21 +12,30 @@ static uint8_t bitmap[MAX_FRAMES / 8];
 static uint64_t frame_count;
 static uint64_t mem_end;
 
+/* 把第 frame 个 4KB 页标成已占用。 */
 static void bit_set(uint64_t frame)
 {
 	bitmap[frame >> 3] |= (uint8_t)(1u << (frame & 7));
 }
 
+/* 把第 frame 个 4KB 页标成空闲。 */
 static void bit_clear(uint64_t frame)
 {
 	bitmap[frame >> 3] &= (uint8_t)~(1u << (frame & 7));
 }
 
+/* 返回 1 表示该页已占用。 */
 static int bit_test(uint64_t frame)
 {
 	return (bitmap[frame >> 3] >> (frame & 7)) & 1;
 }
 
+/*
+ * 确定可用物理内存的结尾，并建立位图。
+ * 魔数和 flags 第 0 位都有效时，用 mem_upper 计算结尾；否则按 128MB。
+ * 结尾不超过已经恒等映射的 1GB。位图先全部标占用，再把 stack_top 到
+ * 结尾之间的页标成空闲。stack_top 以下留给内核映像和低 1MB。
+ */
 void pmm_init(void)
 {
 	uint64_t end = 128UL * 1024 * 1024;
@@ -52,6 +61,7 @@ void pmm_init(void)
 		bit_clear(addr / PAGE);
 }
 
+/* 从低地址找第一个空闲页，标成占用并返回物理地址。没有空闲页时返回 0。 */
 uint64_t pmm_alloc(void)
 {
 	for (uint64_t frame = 0; frame < frame_count; frame++) {
@@ -63,6 +73,7 @@ uint64_t pmm_alloc(void)
 	return 0;
 }
 
+/* 把一页标回空闲。地址超出结尾或没有按 4KB 对齐时忽略。 */
 void pmm_free(uint64_t phys)
 {
 	if (phys >= mem_end || (phys & (PAGE - 1)) != 0)
