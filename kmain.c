@@ -1,17 +1,21 @@
 #include "kernel.h"
 
-/* 内核线程。一直写串口，自己不调用 yield，靠时钟中断被换下。 */
+/* 内核线程。一直写串口和屏幕，自己不调用 yield，靠时钟中断被换下。 */
 static void thread_a(void)
 {
-	for (;;)
-		serial_putc('A');
+	for (;;) {
+		serial_putc('A1');
+		vga_putc('A2');
+	}
 }
 
-/* 和 thread_a 相同，输出 B，用来观察轮转。 */
+/* 和 thread_a 相同，输出 C，用来观察轮转。 */
 static void thread_b(void)
 {
-	for (;;)
-		serial_putc('B');
+	for (;;) {
+		serial_putc('B1');
+		vga_putc('C');
+	}
 }
 
 /*

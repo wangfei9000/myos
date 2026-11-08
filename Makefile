@@ -8,7 +8,7 @@ CFLAGS := -m64 -ffreestanding -fno-pie -fno-stack-protector -mno-red-zone \
 	-mgeneral-regs-only -fno-asynchronous-unwind-tables -Wall -Wextra -c -O1
 LDFLAGS := -m elf_x86_64 -z max-page-size=0x1000 -z noexecstack --build-id=none -T linker.ld
 
-SRCS := kmain.c pmm.c task.c idt.c pic.c serial.c
+SRCS := kmain.c pmm.c task.c idt.c pic.c serial.c vga.c
 ASMS := boot.S swtch.S trap.S
 OBJS := $(SRCS:.c=.o) $(ASMS:.S=.o)
 
@@ -32,8 +32,10 @@ check: boot.elf
 boot32.elf: boot.elf
 	objcopy -O elf32-i386 boot.elf boot32.elf
 
+# 当前环境没有 DISPLAY，GTK 窗口会初始化失败。curses 把 VGA 文字画在终端里。
+# 串口写到 serial.log，避免和 curses 抢同一个终端。
 run: boot32.elf
-	qemu-system-x86_64 -kernel boot32.elf -serial stdio -display none -no-reboot
+	qemu-system-x86_64 -kernel boot32.elf -display curses -serial file:serial.log -no-reboot
 
 clean:
-	rm -f $(OBJS) boot.elf boot32.elf
+	rm -f $(OBJS) boot.elf boot32.elf serial.log

@@ -51,12 +51,25 @@ make run
 
 ```bash
 objcopy -O elf32-i386 boot.elf boot32.elf
-qemu-system-x86_64 -kernel boot32.elf -serial stdio -display none -no-reboot
+qemu-system-x86_64 -kernel boot32.elf -display curses -serial file:serial.log -no-reboot
 ```
 
 QEMU 的 `-kernel` 只接受 32 位 ELF。直接把 `boot.elf` 交给它会报 `Cannot load x86-64 image, give a 32bit one.` `objcopy` 只改容器：入口仍是 32 位的 `_start`，`entry64` 之后的机器码仍是 64 位。
 
-成功时串口连续出现 `A` 和 `B`。两个线程都是死循环，自己不让出 CPU。大约每 10ms 一次时钟中断，所以看到的是几千个同样的字母，然后换成另一个字母。进程一直运行，结束 QEMU 用 Ctrl-A，松开后再按 X。`-serial stdio` 会把 Ctrl-C 送进串口，不能用来退出。
+两个线程都是死循环，自己不让出 CPU。大约每 10ms 一次时钟中断，所以同一路输出里会先连续出现几千个相同字符，再换成另一个线程的字符。VGA 文字画在当前终端里，COM1 的字节写到 `serial.log`。进程一直运行。curses 接管键盘后 Ctrl-C 不会结束 QEMU：按 Esc，再按 2，进入监视器，输入 `quit` 回车。
+
+### GTK 窗口起不来
+
+去掉 `-display none` 后，QEMU 默认打开 GTK 图形窗口，用来显示写进 `0xB8000` 的文字。这台机器没有图形界面，`DISPLAY` 为空，于是：
+
+```text
+gtk initialization failed
+make: *** [Makefile:36: run] Error 1
+```
+
+`-display curses` 不依赖 GTK。它用终端把 80×25 文字模式画出来，`vga_putc` 写入的字符可以直接看到。curses 已经占用了这个终端，串口不能再用 `-serial stdio`，否则两路输出抢同一个屏幕。COM1 改写到 `serial.log`，需要看串口时另开文件。
+
+`kmain.c` 里如果写成 `serial_putc('A1')` 这种单引号，`'A1'` 是多字符常量，参数类型是 `char`，实际只留下最后一个字节。`'A1'` 和 `'B1'` 写到串口都是 `1`，`'A2'` 写到屏幕是 `2`。要输出两个字符，分成两次调用，例如 `vga_putc('A'); vga_putc('1');`。
 
 CPU 不支持长模式时，屏幕左上角是红底白字 `NO`，串口没有输出。QEMU 的虚拟 CPU 支持长模式，这条路径是给真机准备的。
 
@@ -424,7 +437,7 @@ CPU 进入 `irq_timer` 之前已经压好 `SS、RSP、RFLAGS、CS、RIP`。桩�
 
 COM1 数据口是 `0x3f8`，线状态口是 `0x3fd`。`serial_putc` 等到状态位 5 变成 1，表示发送保持寄存器空，再把字节写到 `0x3f8`。`serial_hex` 固定打印 `0x` 和 16 个十六进制字符。`panic` 打印 `panic: ` 和消息，然后关中断、`hlt`。
 
-QEMU 把这个端口接到启动它的终端，所以 `make run` 的标准输出就是这两条线程的字母。
+`make run` 用 `-serial file:serial.log` 把这个端口接到文件。curses 占用当前终端来显示 VGA，串口字节在 `serial.log` 里。
 
 ## 编译选项
 
